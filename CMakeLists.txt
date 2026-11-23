@@ -13,6 +13,11 @@ endif()
 find_package(fmt CONFIG REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS asio beast)
 
-add_executable(gateway src/main.cpp)
+add_executable(gateway 
+    src/main.cpp
+    src/net/http_server.cpp
+)
+target_include_directories(gateway PRIVATE src)
+target_compile_definitions(gateway PRIVATE BOOST_ASIO_NO_DEPRECATED)
 target_link_libraries(gateway PRIVATE fmt::fmt Boost::asio Boost::beast)
 target_compile_options(gateway PRIVATE -Wall -Wextra -Wpedantic)
