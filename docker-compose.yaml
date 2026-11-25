@@ -1,0 +1,12 @@
+services:
+  fastapi:
+    build: ./services/fastapi
+    environment:
+      SERVICE_NAME: fastapi
+    ports:
+      - "9000:8000"
+    networks:
+      - course_work_api_gateway
+
+networks:
+  course_work_api_gateway: {}

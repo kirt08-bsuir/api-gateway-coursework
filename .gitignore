@@ -1,5 +1,12 @@
 /doc/
 /report/
 CLAUDE.md
-/build/
+
 .vscode/
+
+vcpkg_installed/
+/build/
+
+.venv/
+__pycache__/
+.ruff_cache/
