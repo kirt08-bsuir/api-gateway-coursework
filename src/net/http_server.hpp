@@ -8,8 +8,8 @@ namespace gateway::net {
 
 class HttpServer {
 public:
-    HttpServer(boost::asio::io_context& ioc, const boost::asio::ip::tcp::endpoint& endpoint);
-    
+    HttpServer(boost::asio::io_context &ioc, const boost::asio::ip::tcp::endpoint &endpoint);
+
     void start();
 
 private:
@@ -18,4 +18,4 @@ private:
     boost::asio::ip::tcp::acceptor acceptor_;
 };
 
-}
+} // namespace gateway::net

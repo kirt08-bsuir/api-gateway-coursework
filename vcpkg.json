@@ -1,9 +1,11 @@
 {
+    "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
     "name": "api-gateway",
     "version": "0.1.0",
     "dependencies": [
         "fmt",
         "boost-asio",
         "boost-beast"
-    ]
+    ],
+    "builtin-baseline": "4702e381dbbd9b54d3f7e1eb565cd8981c1814cd"
 }
