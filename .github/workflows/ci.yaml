@@ -1,0 +1,93 @@
+# GitHub Context info:
+
+# github.ref - get the whole path to push/tag/PR
+# example: PR: refs/pull/X/merge - where X is the number of PR
+
+# github.base_ref - target branch, inside which we trying to merge changes
+# example: main
+
+# github.head_ref - source branch, where changes comes from
+# example: feature/login or basically dev
+
+# github.workspace - path to folder with code on runner's machine 
+
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main, dev]
+    
+# GITHUB_TOKEN of this workflow can only read the repo
+permissions:
+    contents: read
+
+# prevent unnecessary runs
+concurrency:
+    group: ci-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    pr-source:
+        name: pr-source
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        runs-on: ubuntu-24.04
+        timeout-minutes: 2
+        steps:
+            - name: Source branch must be dev
+            
+              env:
+                HEAD_REF: ${{ github.head_ref }}
+              run: |
+                if [ "$HEAD_REF" != "dev" ]; then
+                    echo "::error:: Impossible to merge, we can merge main only with dev"
+                    exit 1
+                fi
+            
+    format:
+        name: format
+        runs-on: ubuntu-24.04
+        timeout-minutes: 5
+        steps:
+            - uses: actions/checkout@v7
+
+            # xargs - get the result from previous command through pipe ('|') and put them in the end of next command (in your case it is clang-format)
+            # --dry-run - just checking files, without formatting
+            # --Werror - transform formatting warnings into errors
+            - name: Check formatting
+              run: find src -name '*.cpp' -o -name '*.hpp' | xargs clang-format-18 --dry-run --Werror
+            
+    build:
+        name: build
+        runs-on: ubuntu-24.04
+        timeout-minutes: 60
+        env:
+            VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+            VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-cache
+        steps:
+            - uses: actions/checkout@v7
+
+            - name: Read vcpkg baseline
+              run: echo "VCPKG_COMMIT=$(jq -r '."builtin-baseline"' vcpkg.json)" >> "$GITHUB_ENV"
+
+            - name: Set up vcpkg
+              run: |
+                git clone https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+                git -C "$VCPKG_ROOT" checkout "$VCPKG_COMMIT"
+                "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+                mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+            
+            - name: Cache vcpkg packages
+              uses: actions/cache@v6
+              with:
+                path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+                key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+                restore-keys: vcpkg-${{ runner.os }}-
+
+            - name: Configure
+              run: cmake --preset debug -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+            - name: Build
+              run: cmake --build --preset debug
+            

@@ -7,15 +7,15 @@
 namespace gateway::net {
 
 class HttpServer {
-public:
-    HttpServer(boost::asio::io_context& ioc, const boost::asio::ip::tcp::endpoint& endpoint);
-    
+  public:
+    HttpServer(boost::asio::io_context &ioc, const boost::asio::ip::tcp::endpoint &endpoint);
+
     void start();
 
-private:
+  private:
     boost::asio::awaitable<void> accept_loop();
 
     boost::asio::ip::tcp::acceptor acceptor_;
 };
 
-}
+} // namespace gateway::net
