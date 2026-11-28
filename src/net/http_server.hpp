@@ -2,7 +2,7 @@
 
 #include <boost/asio/ip/tcp.hpp>
 
-#include "core/upstream.hpp"
+#include "core/router.hpp"
 #include "net/upstream_client.hpp"
 
 namespace gateway::net {
@@ -13,7 +13,7 @@ public:
         boost::asio::io_context &ioc,
         const boost::asio::ip::tcp::endpoint &endpoint,
         UpstreamClient &upstream_client,
-        core::Upstream upstream
+        const core::Router &router
     );
 
     void start();
@@ -25,7 +25,7 @@ private:
 
     UpstreamClient &upstream_client_;
 
-    core::Upstream upstream_;
+    const core::Router &router_;
 };
 
 } // namespace gateway::net
