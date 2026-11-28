@@ -16,6 +16,7 @@ find_package(Boost CONFIG REQUIRED COMPONENTS asio beast)
 add_executable(gateway 
     src/main.cpp
     src/net/http_server.cpp
+    src/net/upstream_client.cpp
 )
 target_include_directories(gateway PRIVATE src)
 target_compile_definitions(gateway PRIVATE BOOST_ASIO_NO_DEPRECATED)

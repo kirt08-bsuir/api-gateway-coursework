@@ -20,12 +20,12 @@ using tcp = asio::ip::tcp;
 
 namespace {
 
+constexpr std::string_view kServerName = "course_work_gateway";
+
 using Request = http::request<http::string_body>;
 using Response = http::response<http::string_body>;
 
 constexpr auto use_tuple = asio::as_tuple(asio::use_awaitable);
-
-std::string_view sv(beast::string_view s) { return {s.data(), s.size()}; };
 
 void log_exception(std::exception_ptr error) {
     if (!error)
@@ -39,22 +39,20 @@ void log_exception(std::exception_ptr error) {
     }
 }
 
-Response make_response(const Request &req, std::string_view client) {
-    Response res{http::status::ok, req.version()};
-
-    res.set(http::field::server, "course_work_gateway");
+Response make_error_response(http::status status, unsigned version, std::string_view text) {
+    Response res{status, version};
+    res.set(http::field::server, kServerName);
     res.set(http::field::content_type, "text/plain; charset=utf-8");
-
-    res.keep_alive(req.keep_alive());
-
-    res.body() = fmt::format("gateway: {} {} from {}\n", sv(req.method_string()), sv(req.target()),
-                             client);
-
+    res.body() = std::string(text) + "\n";
     res.prepare_payload();
     return res;
 }
 
-asio::awaitable<void> run_session(beast::tcp_stream stream) {
+asio::awaitable<void> run_session(
+    beast::tcp_stream stream,
+    UpstreamClient &upstream_client,
+    const core::Upstream &upstream
+) {
     beast::error_code ec;
 
     const tcp::endpoint peer = stream.socket().remote_endpoint(ec);
@@ -75,9 +73,34 @@ asio::awaitable<void> run_session(beast::tcp_stream stream) {
             break;
         }
 
-        Response res = make_response(req, client);
-        fmt::print("[{}] {} {} -> {}\n", client, sv(req.method_string()), sv(req.target()),
-                   res.result_int());
+        // remember everything from request, before send new one to our upstream
+        const bool keep_alive = req.keep_alive();
+        const unsigned version = req.version();
+        const std::string method = req.method_string();
+        const std::string target = req.target();
+
+        Response res;
+        try {
+            res = co_await upstream_client.forward(upstream, std::move(req));
+        } catch (const boost::system::system_error &e) {
+            fmt::print(
+                "[{}] upstream {} error: {}\n",
+                client,
+                upstream.address(),
+                e.code().message()
+            );
+            res = make_error_response(http::status::bad_gateway, version, "502 Bad Gateway");
+        }
+
+        res.keep_alive(keep_alive);
+        fmt::print(
+            "[{}] {} {} -> {} {}\n",
+            client,
+            method,
+            target,
+            upstream.address(),
+            res.result_int()
+        );
 
         auto [write_ec, written] = co_await http::async_write(stream, res, use_tuple);
         if (write_ec) {
@@ -95,12 +118,20 @@ asio::awaitable<void> run_session(beast::tcp_stream stream) {
 
 } // namespace
 
-HttpServer::HttpServer(asio::io_context &ioc, const tcp::endpoint &endpoint)
-    : acceptor_(ioc, endpoint){};
+HttpServer::HttpServer(
+    asio::io_context &ioc,
+    const tcp::endpoint &endpoint,
+    UpstreamClient &upstream_client,
+    core::Upstream upstream
+)
+    : acceptor_(ioc, endpoint), upstream_client_(upstream_client), upstream_(std::move(upstream)) {}
 
 void HttpServer::start() {
-    fmt::print("listening on {}:{}\n", acceptor_.local_endpoint().address().to_string(),
-               acceptor_.local_endpoint().port());
+    fmt::print(
+        "listening on {}:{}\n",
+        acceptor_.local_endpoint().address().to_string(),
+        acceptor_.local_endpoint().port()
+    );
 
     asio::co_spawn(acceptor_.get_executor(), accept_loop(), log_exception);
 }
@@ -119,8 +150,11 @@ asio::awaitable<void> HttpServer::accept_loop() {
 
         // for each connection we create a new coroutine-session
         // beast::tcp_stream wraps a basic socket and adds timeout support.
-        asio::co_spawn(acceptor_.get_executor(), run_session(beast::tcp_stream(std::move(socket))),
-                       log_exception);
+        asio::co_spawn(
+            acceptor_.get_executor(),
+            run_session(beast::tcp_stream(std::move(socket)), upstream_client_, upstream_),
+            log_exception
+        );
 
         // Do not wait for the session to finish (no co_await); immediately accept the next client.
     }
