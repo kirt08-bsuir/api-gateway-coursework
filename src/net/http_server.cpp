@@ -8,6 +8,7 @@
 #include <boost/beast/http.hpp>
 #include <exception>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <string>
 #include <string_view>
 
@@ -48,10 +49,53 @@ Response make_error_response(http::status status, unsigned version, std::string_
     return res;
 }
 
+/**
+ * @brief Transform net request (dependent on Beast) into core request DTO
+ * @param request beast::request that you got from client
+ * @param client address of original client
+ */
+core::RequestInfo make_request_info(const Request &request, const std::string &client) {
+    const std::string_view target = request.target();
+    const std::size_t question_mark_pos = target.find('?');
+
+    return {
+        .method = std::string(request.method_string()),
+        .path = std::string(target.substr(0, question_mark_pos)),
+        .query = question_mark_pos == std::string_view::npos
+                     ? ""
+                     : std::string(target.substr(question_mark_pos + 1)),
+        .client_ip = client,
+    };
+}
+
+asio::awaitable<Response> proxy_request(
+    UpstreamClient &upstream_client,
+    const core::Route &route,
+    std::string upstream_target,
+    Request req,
+    const std::string &client
+) {
+    const unsigned version = req.version();
+    req.target(upstream_target);
+
+    try {
+        co_return co_await upstream_client.forward(route.upstream, std::move(req));
+    } catch (const boost::system::system_error &e) {
+        fmt::print(
+            "[{}] upstream {} error: {}\n",
+            client,
+            route.upstream.address(),
+            e.code().message()
+        );
+    }
+
+    co_return make_error_response(http::status::bad_gateway, version, "502 Bad Gateway");
+}
+
 asio::awaitable<void> run_session(
     beast::tcp_stream stream,
     UpstreamClient &upstream_client,
-    const core::Upstream &upstream
+    const core::Router &router
 ) {
     beast::error_code ec;
 
@@ -79,17 +123,37 @@ asio::awaitable<void> run_session(
         const std::string method = req.method_string();
         const std::string target = req.target();
 
+        const core::RouteResult route_result = router.match(make_request_info(req, client));
         Response res;
-        try {
-            res = co_await upstream_client.forward(upstream, std::move(req));
-        } catch (const boost::system::system_error &e) {
-            fmt::print(
-                "[{}] upstream {} error: {}\n",
-                client,
-                upstream.address(),
-                e.code().message()
+
+        switch (route_result.status) {
+        case core::MatchStatus::NotFound:
+            res = make_error_response(http::status::not_found, version, "404 Not Found");
+            break;
+
+        case core::MatchStatus::MethodNotAllowed:
+            res = make_error_response(
+                http::status::method_not_allowed,
+                version,
+                "405 Method Not Allowed"
             );
-            res = make_error_response(http::status::bad_gateway, version, "502 Bad Gateway");
+
+            // RFC 9110: A 405 response MUST include an Allow header listing the supported methods.
+            res.set(
+                http::field::allow,
+                fmt::format("{}", fmt::join(route_result.route->methods, ", "))
+            );
+            break;
+
+        case core::MatchStatus::Matched:
+            res = co_await proxy_request(
+                upstream_client,
+                *route_result.route,
+                route_result.upstream_target,
+                std::move(req),
+                client
+            );
+            break;
         }
 
         res.keep_alive(keep_alive);
@@ -98,7 +162,7 @@ asio::awaitable<void> run_session(
             client,
             method,
             target,
-            upstream.address(),
+            route_result.route ? route_result.route->name : "-",
             res.result_int()
         );
 
@@ -122,9 +186,9 @@ HttpServer::HttpServer(
     asio::io_context &ioc,
     const tcp::endpoint &endpoint,
     UpstreamClient &upstream_client,
-    core::Upstream upstream
+    const core::Router &router
 )
-    : acceptor_(ioc, endpoint), upstream_client_(upstream_client), upstream_(std::move(upstream)) {}
+    : acceptor_(ioc, endpoint), upstream_client_(upstream_client), router_(router) {}
 
 void HttpServer::start() {
     fmt::print(
@@ -152,7 +216,7 @@ asio::awaitable<void> HttpServer::accept_loop() {
         // beast::tcp_stream wraps a basic socket and adds timeout support.
         asio::co_spawn(
             acceptor_.get_executor(),
-            run_session(beast::tcp_stream(std::move(socket)), upstream_client_, upstream_),
+            run_session(beast::tcp_stream(std::move(socket)), upstream_client_, router_),
             log_exception
         );
 

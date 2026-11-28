@@ -10,15 +10,33 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   add_link_options(-fsanitize=address,undefined)
 endif()
 
+add_compile_options(-Wall -Wextra -Wpedantic)
+
 find_package(fmt CONFIG REQUIRED)
 find_package(Boost CONFIG REQUIRED COMPONENTS asio beast)
+find_package(GTest CONFIG REQUIRED)
+
+add_library(gateway_core STATIC
+    src/core/router.cpp
+)
+
+target_include_directories(gateway_core PUBLIC src)
 
 add_executable(gateway 
     src/main.cpp
     src/net/http_server.cpp
     src/net/upstream_client.cpp
 )
-target_include_directories(gateway PRIVATE src)
 target_compile_definitions(gateway PRIVATE BOOST_ASIO_NO_DEPRECATED)
-target_link_libraries(gateway PRIVATE fmt::fmt Boost::asio Boost::beast)
-target_compile_options(gateway PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(gateway PRIVATE gateway_core fmt::fmt Boost::asio Boost::beast)
+
+enable_testing()
+
+add_executable(core_tests
+    tests/core/router_test.cpp
+)
+
+target_link_libraries(core_tests PRIVATE gateway_core GTest::gtest_main)
+
+include(GoogleTest)
+gtest_discover_tests(core_tests)

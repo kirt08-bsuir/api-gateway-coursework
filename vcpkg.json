@@ -5,7 +5,8 @@
     "dependencies": [
         "fmt",
         "boost-asio",
-        "boost-beast"
+        "boost-beast",
+        "gtest"
     ],
     "builtin-baseline": "4702e381dbbd9b54d3f7e1eb565cd8981c1814cd"
 }

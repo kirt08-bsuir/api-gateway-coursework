@@ -13,6 +13,16 @@ using HttpResponse = boost::beast::http::response<boost::beast::http::string_bod
 
 class UpstreamClient {
 public:
+    /**
+     * @brief Forwards HTTP request to specified upstream server and returns its response
+     *
+     * @param upstream Target backend service (host and port)
+     * @param request Incoming request (client -> gateway)
+     * @return Awaitable resolving (result) to the HTTP response received from the upstream (backend
+     *service)
+     * @throws boost::system::system_error on DNS resolution, connecting to upstream, or network I/O
+     *errors
+     */
     boost::asio::awaitable<HttpResponse> forward(
         const core::Upstream &upstream,
         HttpRequest request
